@@ -72,7 +72,10 @@ export default function Home() {
     const gs = createGame(mode, playerCount, initialMoney, difficulty)
     setGame(gs)
     const diffLabel = difficulty === 'easy' ? '简单' : difficulty === 'hard' ? '困难' : '普通'
-    setMessages([`🎲 游戏开始！初始资金 ¥${initialMoney} | 难度：${diffLabel}` + (mode === 'ai' ? ' 你的对手是小火(激进)和阿平(平衡)' : ` ${playerCount}人本地对战`)])
+    setMessages([
+      `🎲 游戏开始！初始资金 ¥${initialMoney} | 难度：${diffLabel}` + (mode === 'ai' ? ' 你的对手是小火(激进)和阿平(平衡)' : ` ${playerCount}人本地对战`),
+      `📋 规则：放弃购买→触发拍卖 | 10回合后租金x1.5 | 20回合后x2 | 起点奖金随回合递增 | 可发起交易`,
+    ])
     setScreen('game')
     setBuyPrompt(null)
     setHighlightTile(undefined)
@@ -324,19 +327,52 @@ export default function Home() {
       } else {
         setMessages(m => [...m, `❌ ${player.name} 放弃购买 ${buyPrompt.tile.name}`])
         rendererRef.current?.showCenterFloat(`${player.name}放弃`, '#94a3b8')
-        // 触发拍卖
+        // 触发拍卖：AI立即自动竞价
         const otherPlayers = gs.players.filter(p => p.id !== player.id && !p.bankrupt)
         if (otherPlayers.length > 0) {
-          gs.phase = 'auction'
-          setAuctionState({
-            tile: buyPrompt.tile,
-            highestBid: Math.floor(buyPrompt.tile.price * 0.5),
-            highestBidder: null,
-            passedPlayers: [player.id],
-          })
-          setMessages(m => [...m, `🔨 ${buyPrompt.tile.name} 进入拍卖！起拍价 ¥${Math.floor(buyPrompt.tile.price * 0.5)}`])
-          setBuyPrompt(null)
-          return gs
+          let currentBid = Math.floor(buyPrompt.tile.price * 0.5)
+          let winner: Player | null = null
+          const aiBidders = otherPlayers.filter(p => p.isAI)
+          const humanBidders = otherPlayers.filter(p => !p.isAI)
+
+          // AI 自动竞价（轮流加价直到都放弃）
+          let changed = true
+          while (changed) {
+            changed = false
+            for (const ai of aiBidders) {
+              const bid = auctionDecision(ai, buyPrompt.tile, currentBid)
+              if (bid > currentBid) {
+                currentBid = bid
+                winner = ai
+                changed = true
+              }
+            }
+          }
+
+          if (humanBidders.length > 0) {
+            // 有其他人类玩家可参与：进入拍卖UI
+            gs.phase = 'auction'
+            setAuctionState({
+              tile: buyPrompt.tile,
+              highestBid: currentBid,
+              highestBidder: winner,
+              passedPlayers: [player.id, ...aiBidders.map(p => p.id)],
+            })
+            const aiMsg = winner ? ` AI最高出价 ¥${currentBid}（${winner.name}）` : ''
+            setMessages(m => [...m, `🔨 ${buyPrompt.tile.name} 进入拍卖！起拍价 ¥${Math.floor(buyPrompt.tile.price * 0.5)}${aiMsg}`])
+            setBuyPrompt(null)
+            return gs
+          } else if (winner) {
+            // 只有AI参与，直接成交
+            const w = gs.players.find(p => p.id === winner!.id)!
+            w.money -= currentBid
+            w.properties.push(buyPrompt.tile.id)
+            setMessages(m => [...m, `🔨 ${w.name} 以 ¥${currentBid} 拍得 ${buyPrompt.tile.name}！`])
+            rendererRef.current?.showFloatingText(buyPrompt.tile.id, `🔨${w.name}拍得`, '#4ade80')
+            playBuySound()
+          } else {
+            setMessages(m => [...m, `🔨 无人竞拍 ${buyPrompt.tile.name}，流拍`])
+          }
         }
       }
 
@@ -387,88 +423,53 @@ export default function Home() {
     })
   }, [game])
 
-  // 拍卖出价
+  // 拍卖结束：通用的结算+推进下一玩家
+  const finishAuction = useCallback((gs: GameState) => {
+    let next = (gs.currentPlayer + 1) % gs.players.length
+    while (gs.players[next].bankrupt) next = (next + 1) % gs.players.length
+    if (next <= gs.currentPlayer) gs.round++
+    gs.currentPlayer = next
+    gs.phase = 'roll'
+
+    if (!gs.gameOver && gs.players[gs.currentPlayer].isAI) {
+      setTimeout(() => handleAITurns(gs), 1000)
+    }
+  }, [handleAITurns])
+
+  // 拍卖出价（人类玩家加价）
   const handleAuctionBid = useCallback((bid: number) => {
     if (!game || !auctionState) return
-    setGame(prev => {
-      if (!prev) return null
-      const gs = { ...prev, players: prev.players.map(p => ({ ...p, properties: [...p.properties] })) }
-      const player = gs.players[gs.currentPlayer]
-      if (bid > 0 && bid <= player.money) {
-        setAuctionState(a => a ? { ...a, highestBid: bid, highestBidder: player } : null)
-        setMessages(m => [...m, `🔨 ${player.name} 出价 ¥${bid}`])
-      }
-      return gs
-    })
-  }, [game, auctionState])
-
-  // 拍卖放弃
-  const handleAuctionPass = useCallback(() => {
-    if (!game || !auctionState) return
-    const currentP = game.players[game.currentPlayer]
-    const newPassed = [...auctionState.passedPlayers, currentP.id]
-    const remaining = game.players.filter(p => !p.bankrupt && !newPassed.includes(p.id))
-
-    if (remaining.length === 0) {
-      // 所有人放弃或只剩竞拍者
-      if (auctionState.highestBidder) {
-        setGame(prev => {
-          if (!prev) return null
-          const gs = { ...prev, players: prev.players.map(p => ({ ...p, properties: [...p.properties] })) }
-          const winner = gs.players.find(p => p.id === auctionState.highestBidder!.id)!
-          winner.money -= auctionState.highestBid
-          winner.properties.push(auctionState.tile.id)
-          setMessages(m => [...m, `🔨 ${winner.name} 以 ¥${auctionState.highestBid} 拍得 ${auctionState.tile.name}！`])
-          rendererRef.current?.showFloatingText(auctionState.tile.id, `🔨${winner.name}拍得`, '#4ade80')
-          playBuySound()
-          gs.phase = 'roll'
-          return gs
-        })
-      } else {
-        setMessages(m => [...m, `🔨 无人竞拍 ${auctionState.tile.name}，流拍`])
-        setGame(prev => prev ? { ...prev, phase: 'roll' } : null)
-      }
-      setAuctionState(null)
-    } else {
-      setAuctionState({ ...auctionState, passedPlayers: newPassed })
-      setMessages(m => [...m, `🔨 ${currentP.name} 放弃竞拍`])
-      // AI自动出价
-      const nextBidder = remaining[0]
-      if (nextBidder.isAI) {
-        setTimeout(() => {
-          const aiBid = auctionDecision(nextBidder, auctionState.tile, auctionState.highestBid)
-          if (aiBid > 0) {
-            setAuctionState(a => a ? { ...a, highestBid: aiBid, highestBidder: nextBidder } : null)
-            setMessages(m => [...m, `🔨 ${nextBidder.name} 出价 ¥${aiBid}`])
-          }
-          // AI也pass后继续检查
-          const afterAIPassed = [...newPassed, ...(aiBid === 0 ? [nextBidder.id] : [])]
-          if (aiBid === 0) {
-            setAuctionState(a => a ? { ...a, passedPlayers: afterAIPassed } : null)
-            setMessages(m => [...m, `🔨 ${nextBidder.name} 放弃竞拍`])
-          }
-        }, 600)
-      }
+    const bidder = game.players.find(p => !p.bankrupt && !p.isAI && !auctionState.passedPlayers.includes(p.id))
+    if (!bidder) return
+    if (bid > 0 && bid <= bidder.money && bid > auctionState.highestBid) {
+      setAuctionState({ ...auctionState, highestBid: bid, highestBidder: bidder })
+      setMessages(m => [...m, `🔨 ${bidder.name} 出价 ¥${bid}`])
     }
   }, [game, auctionState])
 
-  // 拍卖结束（确认出价）
-  const handleAuctionConfirm = useCallback(() => {
-    if (!game || !auctionState || !auctionState.highestBidder) return
+  // 拍卖放弃/确认结果（结束拍卖，推进下一玩家）
+  const handleAuctionEnd = useCallback(() => {
+    if (!game || !auctionState) return
     setGame(prev => {
       if (!prev) return null
       const gs = { ...prev, players: prev.players.map(p => ({ ...p, properties: [...p.properties] })) }
-      const winner = gs.players.find(p => p.id === auctionState.highestBidder!.id)!
-      winner.money -= auctionState.highestBid
-      winner.properties.push(auctionState.tile.id)
-      setMessages(m => [...m, `🔨 ${winner.name} 以 ¥${auctionState.highestBid} 拍得 ${auctionState.tile.name}！`])
-      rendererRef.current?.showFloatingText(auctionState.tile.id, `🔨${winner.name}拍得`, '#4ade80')
-      playBuySound()
-      gs.phase = 'roll'
+
+      if (auctionState.highestBidder) {
+        const winner = gs.players.find(p => p.id === auctionState.highestBidder!.id)!
+        winner.money -= auctionState.highestBid
+        winner.properties.push(auctionState.tile.id)
+        setMessages(m => [...m, `🔨 ${winner.name} 以 ¥${auctionState.highestBid} 拍得 ${auctionState.tile.name}！`])
+        rendererRef.current?.showFloatingText(auctionState.tile.id, `🔨${winner.name}拍得`, '#4ade80')
+        playBuySound()
+      } else {
+        setMessages(m => [...m, `🔨 无人竞拍 ${auctionState.tile.name}，流拍`])
+      }
+
+      finishAuction(gs)
       return gs
     })
     setAuctionState(null)
-  }, [game, auctionState])
+  }, [game, auctionState, finishAuction])
 
   // 交易：选择对方玩家
   const handleTradeSelectPlayer = useCallback((targetPlayer: Player) => {
@@ -542,7 +543,7 @@ export default function Home() {
   return (
     <div className="h-screen w-screen flex">
       {/* ===== 左侧：棋盘 ===== */}
-      <div className="flex-1 flex items-center justify-center bg-[#0f1419] p-4 relative">
+      <div className="flex-1 flex items-center justify-center bg-[#1a2332] p-4 relative">
         <canvas ref={canvasRef} className="max-w-full max-h-full" />
 
         {/* 游戏控制栏（游戏中可见） */}
@@ -785,9 +786,9 @@ export default function Home() {
 
       {/* ===== 右侧：信息面板 ===== */}
       {screen === 'game' && game && (
-        <div className="w-80 bg-[#1a2332] border-l border-white/10 flex flex-col h-screen overflow-hidden">
+        <div className="w-80 bg-[#1a2332] border-l border-white/8 flex flex-col h-screen overflow-hidden">
           {/* 当前玩家（带颜色条+大头像） */}
-          <div className="p-4 border-b border-white/10 relative overflow-hidden">
+          <div className="p-4 border-b border-white/8 relative overflow-hidden">
             <div className="absolute inset-0 opacity-10" style={{ background: `linear-gradient(135deg, ${currentPlayer?.color}44, transparent)` }} />
             <div className="absolute top-0 left-0 w-full h-1" style={{ background: currentPlayer?.color }} />
             <div className="relative flex items-center justify-between">
@@ -797,7 +798,7 @@ export default function Home() {
                   {currentPlayer?.avatar}
                 </div>
                 <div>
-                  <div className="text-white font-bold text-lg">{currentPlayer?.name}的回合</div>
+                  <div className="text-gray-100 font-bold text-lg">{currentPlayer?.name}的回合</div>
                   <div className="text-gray-500 text-xs">第{game.round}回合 / 共{game.maxRounds}回合</div>
                 </div>
               </div>
@@ -809,7 +810,7 @@ export default function Home() {
           </div>
 
           {/* 玩家列表（现金+资产分离显示+当前操作标识） */}
-          <div className="p-3 border-b border-white/10 space-y-2 max-h-60 overflow-y-auto">
+          <div className="p-3 border-b border-white/8 space-y-2 max-h-60 overflow-y-auto">
             {game.players.map(p => {
               const isCurrent = p.id === currentPlayer?.id
               const propValue = p.properties.reduce((sum, id) => sum + BOARD[id].price, 0)
@@ -817,10 +818,10 @@ export default function Home() {
                 <div key={p.id}
                   className={`p-2.5 rounded-xl transition-all relative ${p.bankrupt ? 'opacity-30' : ''}`}
                   style={{
-                    background: isCurrent ? p.color + '22' : 'rgba(255,255,255,0.03)',
+                    background: isCurrent ? p.color + '18' : 'rgba(255,255,255,0.03)',
                     borderWidth: isCurrent ? 1 : 0,
-                    borderColor: isCurrent ? p.color + '55' : 'transparent',
-                    boxShadow: isCurrent ? `0 0 0 2px ${p.color}44, 0 0 12px ${p.color}22` : 'none',
+                    borderColor: isCurrent ? p.color + '44' : 'transparent',
+                    boxShadow: isCurrent ? `0 0 0 2px ${p.color}33, 0 0 12px ${p.color}15` : 'none',
                   }}>
                   {/* 当前操作标识：左侧箭头 */}
                   {isCurrent && !p.bankrupt && (
@@ -843,11 +844,11 @@ export default function Home() {
                         )}
                       </div>
                       <div>
-                        <div className="text-sm text-white font-medium flex items-center gap-1.5">
+                        <div className="text-sm text-gray-200 font-medium flex items-center gap-1.5">
                           {p.name}
                           {isCurrent && !p.bankrupt && (
                             <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold"
-                              style={{ background: p.color + '44', color: p.color }}>
+                              style={{ background: p.color + '33', color: p.color }}>
                               操作中
                             </span>
                           )}
@@ -869,7 +870,7 @@ export default function Home() {
                       <div className="h-full rounded-l-full transition-all duration-500" style={{ width: `${totalWealth(p) > 0 ? (p.money / totalWealth(p)) * 100 : 100}%`, background: p.color }} />
                       <div className="h-full rounded-r-full transition-all duration-500" style={{ width: `${totalWealth(p) > 0 ? (propValue / totalWealth(p)) * 100 : 0}%`, background: '#f59e0b' }} />
                     </div>
-                    <span className="text-[10px] text-gray-400 whitespace-nowrap">共¥{totalWealth(p)}</span>
+                    <span className="text-[10px] text-gray-500 whitespace-nowrap">共¥{totalWealth(p)}</span>
                   </div>
                 </div>
               )
@@ -877,53 +878,57 @@ export default function Home() {
           </div>
 
           {/* 操作区 */}
-          <div className="p-4 border-b border-white/10">
+          <div className="p-4 border-b border-white/8">
             {diceResult && !buyPrompt && (
               <div className="text-center text-sm text-amber-400 font-bold mb-2 bounce-in">
                 🎲 {diceResult}
               </div>
             )}
-            {auctionState ? (
+            {auctionState ? (() => {
+              const nextBidder = game!.players.find(p => !p.bankrupt && !p.isAI && !auctionState.passedPlayers.includes(p.id))
+              return (
               <div className="bounce-in">
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-lg">🔨</span>
-                  <span className="text-white font-bold text-sm">拍卖: {auctionState.tile.name}</span>
+                  <span className="text-gray-100 font-bold text-sm">拍卖: {auctionState.tile.name}</span>
                 </div>
                 <div className="text-xs text-gray-400 mb-2">
                   原价 ¥{auctionState.tile.price} · 当前最高 <span className="text-amber-400 font-bold">¥{auctionState.highestBid}</span>
                   {auctionState.highestBidder && <span> ({auctionState.highestBidder.name})</span>}
                 </div>
-                {isCurrentPlayerHuman && !auctionState.passedPlayers.includes(currentPlayer!.id) ? (
+                {nextBidder ? (
                   <div className="space-y-2">
+                    <div className="text-xs text-blue-300 mb-1">{nextBidder.name} 是否加价？</div>
                     <div className="flex gap-2">
                       <button onClick={() => handleAuctionBid(auctionState.highestBid + 20)}
-                        disabled={auctionState.highestBid + 20 > (currentPlayer?.money || 0)}
+                        disabled={auctionState.highestBid + 20 > nextBidder.money}
                         className="flex-1 py-2 bg-amber-600 rounded-lg text-white text-xs font-bold hover:bg-amber-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                         出价 ¥{auctionState.highestBid + 20}
                       </button>
                       <button onClick={() => handleAuctionBid(auctionState.highestBid + 50)}
-                        disabled={auctionState.highestBid + 50 > (currentPlayer?.money || 0)}
+                        disabled={auctionState.highestBid + 50 > nextBidder.money}
                         className="flex-1 py-2 bg-amber-600 rounded-lg text-white text-xs font-bold hover:bg-amber-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                         +¥50
                       </button>
                     </div>
-                    <button onClick={handleAuctionPass}
-                      className="w-full py-2 bg-white/10 rounded-lg text-gray-300 text-xs hover:bg-white/20 transition-colors">
+                    <button onClick={handleAuctionEnd}
+                      className="w-full py-2 bg-white/8 rounded-lg text-gray-400 text-xs hover:bg-white/15 transition-colors">
                       放弃竞拍
                     </button>
                   </div>
                 ) : (
-                  <button onClick={handleAuctionConfirm}
+                  <button onClick={handleAuctionEnd}
                     className="w-full py-2 bg-green-600 rounded-lg text-white text-xs font-bold hover:bg-green-500 transition-colors">
                     确认结果
                   </button>
                 )}
               </div>
-            ) : tradeState ? (
+              )
+            })() : tradeState ? (
               <div className="bounce-in">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-white font-bold text-sm">🤝 交易</span>
-                  <button onClick={() => setTradeState(null)} className="text-xs text-gray-400 hover:text-white">取消</button>
+                  <span className="text-gray-100 font-bold text-sm">🤝 交易</span>
+                  <button onClick={() => setTradeState(null)} className="text-xs text-gray-400 hover:text-gray-200">取消</button>
                 </div>
                 {tradeState.step === 'selectPlayer' && (
                   <div className="space-y-1.5">
@@ -932,7 +937,7 @@ export default function Home() {
                       <button key={p.id} onClick={() => handleTradeSelectPlayer(p)}
                         className="w-full flex items-center gap-2 p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors text-left">
                         <span>{p.avatar}</span>
-                        <span className="text-xs text-white">{p.name}</span>
+                        <span className="text-xs text-gray-200">{p.name}</span>
                         <span className="text-xs text-gray-500 ml-auto">{p.properties.length}块地</span>
                       </button>
                     ))}
@@ -948,9 +953,9 @@ export default function Home() {
                           className="w-full flex items-center justify-between p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors">
                           <div className="flex items-center gap-2">
                             <span className="w-2 h-2 rounded-full" style={{ background: tile.color }} />
-                            <span className="text-xs text-white">{tile.name}</span>
+                            <span className="text-xs text-gray-200">{tile.name}</span>
                           </div>
-                          <span className="text-xs text-gray-400">原价¥{tile.price}</span>
+                          <span className="text-xs text-gray-500">原价¥{tile.price}</span>
                         </button>
                       )
                     })}
@@ -958,7 +963,7 @@ export default function Home() {
                 )}
                 {tradeState.step === 'setPrice' && tradeState.tile && (
                   <div className="space-y-2">
-                    <div className="text-xs text-gray-400">出价购买 <span className="text-white">{tradeState.tile.name}</span>（建议 ≥ ¥{Math.floor(tradeState.tile.price * 1.2)}）</div>
+                    <div className="text-xs text-gray-400">出价购买 <span className="text-gray-200">{tradeState.tile.name}</span>（建议 ≥ ¥{Math.floor(tradeState.tile.price * 1.2)}）</div>
                     <div className="grid grid-cols-3 gap-1.5">
                       {[1.0, 1.2, 1.5].map(mult => {
                         const price = Math.floor(tradeState.tile!.price * mult)
@@ -986,9 +991,9 @@ export default function Home() {
             ) : sellMode && currentPlayer ? (
               <div className="bounce-in">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-white font-bold text-sm">变卖资产（6折）</span>
+                  <span className="text-gray-100 font-bold text-sm">变卖资产（6折）</span>
                   <button onClick={() => setSellMode(false)}
-                    className="text-xs text-gray-400 hover:text-white transition-colors">
+                    className="text-xs text-gray-400 hover:text-gray-200 transition-colors">
                     返回
                   </button>
                 </div>
@@ -1000,7 +1005,7 @@ export default function Home() {
                       <div key={id} className="flex items-center justify-between p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors">
                         <div className="flex items-center gap-2">
                           <span className="w-2 h-2 rounded-full" style={{ background: tile.color }} />
-                          <span className="text-xs text-white">{tile.name}</span>
+                          <span className="text-xs text-gray-200">{tile.name}</span>
                         </div>
                         <button onClick={() => handleSellProperty(id)}
                           className="text-xs px-2.5 py-1 rounded-md bg-amber-600/80 text-white font-medium hover:bg-amber-500 transition-colors">
@@ -1018,7 +1023,7 @@ export default function Home() {
               <div className="bounce-in">
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-xl">{buyPrompt.tile.emoji}</span>
-                  <span className="text-white font-bold">{buyPrompt.tile.name}</span>
+                  <span className="text-gray-100 font-bold">{buyPrompt.tile.name}</span>
                 </div>
                 <div className="text-xs text-gray-400 mb-3">
                   价格 ¥{buyPrompt.tile.price} · 基础租金 ¥{buyPrompt.tile.rent[0]}
@@ -1030,7 +1035,7 @@ export default function Home() {
                     💰 购买
                   </button>
                   <button onClick={() => handleBuy(false)}
-                    className="flex-1 py-2.5 bg-white/10 rounded-lg text-gray-300 text-sm hover:bg-white/20 transition-colors">
+                    className="flex-1 py-2.5 bg-white/8 rounded-lg text-gray-400 text-sm hover:bg-white/15 transition-colors">
                     跳过
                   </button>
                 </div>
@@ -1045,6 +1050,12 @@ export default function Home() {
                   <button onClick={() => setSellMode(true)}
                     className="w-full py-2 rounded-lg border border-amber-500/30 text-amber-400 text-xs font-medium hover:bg-amber-500/10 transition-colors">
                     🏷️ 变卖资产
+                  </button>
+                )}
+                {game!.players.some(p => p.id !== currentPlayer?.id && !p.bankrupt && p.properties.length > 0) && (
+                  <button onClick={() => setTradeState({ step: 'selectPlayer' })}
+                    className="w-full py-2 rounded-lg border border-blue-500/30 text-blue-400 text-xs font-medium hover:bg-blue-500/10 transition-colors">
+                    🤝 发起交易
                   </button>
                 )}
               </div>
@@ -1062,7 +1073,7 @@ export default function Home() {
               {messages.map((msg, i) => {
                 const isLast = i === messages.length - 1
                 return (
-                  <div key={i} className={`text-xs transition-all ${isLast ? 'text-white font-medium fade-in' : 'text-gray-500'}`}>
+                  <div key={i} className={`text-xs transition-all ${isLast ? 'text-gray-100 font-medium fade-in' : 'text-gray-500'}`}>
                     {msg}
                   </div>
                 )
@@ -1071,7 +1082,7 @@ export default function Home() {
           </div>
 
           {/* 底部：所有玩家的地皮（按颜色分组） */}
-          <div className="p-3 border-t border-white/10 max-h-44 overflow-y-auto">
+          <div className="p-3 border-t border-white/8 max-h-44 overflow-y-auto">
             <div className="text-xs text-gray-500 mb-2">地皮归属</div>
             {game.players.filter(p => p.properties.length > 0).map(p => (
               <div key={p.id} className="mb-2">
@@ -1081,7 +1092,7 @@ export default function Home() {
                 </div>
                 <div className="flex flex-wrap gap-1">
                   {p.properties.map(id => (
-                    <span key={id} className="text-xs px-1.5 py-0.5 rounded text-white"
+                    <span key={id} className="text-xs px-1.5 py-0.5 rounded text-white font-medium"
                       style={{ background: BOARD[id].color + '99' }}>
                       {BOARD[id].name}
                     </span>

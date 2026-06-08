@@ -258,63 +258,39 @@ export class BoardRenderer {
     const { ctx, size } = this
     ctx.clearRect(0, 0, size, size)
 
-    // 暖色木质桌面基底
-    const woodBase = ctx.createLinearGradient(0, 0, size, size)
-    woodBase.addColorStop(0, '#2d2418')
-    woodBase.addColorStop(0.3, '#3a2e1f')
-    woodBase.addColorStop(0.7, '#2f2517')
-    woodBase.addColorStop(1, '#1f1810')
-    ctx.fillStyle = woodBase
+    // 高级深蓝背景（与设置界面一致）
+    const bgGrad = ctx.createRadialGradient(size * 0.4, size * 0.35, 0, size / 2, size / 2, size * 0.75)
+    bgGrad.addColorStop(0, '#243040')
+    bgGrad.addColorStop(0.5, '#1a2332')
+    bgGrad.addColorStop(1, '#131a26')
+    ctx.fillStyle = bgGrad
     ctx.fillRect(0, 0, size, size)
 
-    // 木纹纹理（斜向线条）
+    // 微妙对角线织纹
     ctx.save()
-    ctx.globalAlpha = 0.08
-    ctx.strokeStyle = '#8b6f47'
+    ctx.globalAlpha = 0.025
+    ctx.strokeStyle = '#ffffff'
     ctx.lineWidth = 0.5
-    for (let i = -size; i < size * 2; i += 12) {
+    for (let t = -size; t < size * 2; t += 16) {
       ctx.beginPath()
-      ctx.moveTo(i, 0)
-      ctx.lineTo(i + size * 0.3, size)
+      ctx.moveTo(t, 0)
+      ctx.lineTo(t + size, size)
+      ctx.stroke()
+      ctx.beginPath()
+      ctx.moveTo(t + size, 0)
+      ctx.lineTo(t, size)
       ctx.stroke()
     }
     ctx.restore()
 
-    // 棋盘区域（内阴影效果）
-    const boardMargin = 8
-    const boardSize = size - boardMargin * 2
-
-    // 棋盘底色（深蓝绿，类似经典大富翁）
-    const boardBg = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, boardSize / 2)
-    boardBg.addColorStop(0, '#1e3a3a')
-    boardBg.addColorStop(0.7, '#1a2e2e')
-    boardBg.addColorStop(1, '#152525')
-    ctx.fillStyle = boardBg
-    ctx.fillRect(boardMargin, boardMargin, boardSize, boardSize)
-
-    // 棋盘边框（木质镶边）
-    ctx.strokeStyle = '#5a4a35'
-    ctx.lineWidth = 3
-    ctx.strokeRect(boardMargin, boardMargin, boardSize, boardSize)
-    ctx.strokeStyle = '#8b7355'
-    ctx.lineWidth = 1
-    ctx.strokeRect(boardMargin + 2, boardMargin + 2, boardSize - 4, boardSize - 4)
-
-    // 暗角效果
-    const vignette = ctx.createRadialGradient(size / 2, size / 2, size * 0.3, size / 2, size / 2, size * 0.7)
-    vignette.addColorStop(0, 'rgba(0,0,0,0)')
-    vignette.addColorStop(1, 'rgba(0,0,0,0.4)')
-    ctx.fillStyle = vignette
-    ctx.fillRect(0, 0, size, size)
-
-    // 微妙光斑（模拟灯光照射）
+    // 顶部柔光
     ctx.save()
-    ctx.globalAlpha = 0.06
-    const lightSpot = ctx.createRadialGradient(size * 0.3, size * 0.3, 0, size * 0.3, size * 0.3, size * 0.4)
-    lightSpot.addColorStop(0, '#fff8e7')
-    lightSpot.addColorStop(1, 'transparent')
-    ctx.fillStyle = lightSpot
-    ctx.fillRect(0, 0, size, size)
+    ctx.globalAlpha = 0.05
+    const topLight = ctx.createRadialGradient(size * 0.4, 0, 0, size * 0.4, 0, size * 0.6)
+    topLight.addColorStop(0, '#ffffff')
+    topLight.addColorStop(1, 'transparent')
+    ctx.fillStyle = topLight
+    ctx.fillRect(0, 0, size, size * 0.5)
     ctx.restore()
 
     this.drawBoard(useHighlight, usePlayers)
@@ -342,111 +318,71 @@ export class BoardRenderer {
     return { x, y, w, h, side, isCorner }
   }
 
-  // ===== 棋盘（纸牌质感格子） =====
+  // ===== 棋盘（深色高级格子） =====
   private drawBoard(highlightTile?: number, players?: Player[]) {
     const { ctx } = this
+    const pad = 2
 
     for (let i = 0; i < BOARD_SIZE; i++) {
       const tile = BOARD[i]
       const pos = this.getTilePosition(i)
       const owner = players?.find(p => p.properties.includes(tile.id))
+      const cx = pos.x + pos.w / 2
+      const cy = pos.y + pos.h / 2
 
-      // --- 格子背景（纸牌质感） ---
-      if (i === highlightTile) {
-        ctx.fillStyle = 'rgba(139, 92, 246, 0.4)'
-      } else if (owner) {
-        // 占领格子：暖色纸牌底
-        ctx.fillStyle = 'rgba(255,248,230,0.12)'
-      } else {
-        // 未占领：冷色纸牌底
-        ctx.fillStyle = 'rgba(240,245,255,0.08)'
-      }
-      ctx.fillRect(pos.x, pos.y, pos.w, pos.h)
+      // --- 格子卡片背景 ---
+      const bgColor = i === highlightTile ? 'rgba(139,92,246,0.3)'
+        : owner ? 'rgba(255,255,255,0.12)'
+        : 'rgba(255,255,255,0.06)'
 
-      // 纸牌内阴影（顶部高光，底部暗影）
-      ctx.save()
-      ctx.globalAlpha = 0.06
-      // 顶部高光
-      const topGrad = ctx.createLinearGradient(pos.x, pos.y, pos.x, pos.y + pos.h * 0.2)
-      topGrad.addColorStop(0, '#ffffff')
-      topGrad.addColorStop(1, 'transparent')
-      ctx.fillStyle = topGrad
-      ctx.fillRect(pos.x, pos.y, pos.w, pos.h * 0.2)
-      // 底部暗影
-      const botGrad = ctx.createLinearGradient(pos.x, pos.y + pos.h * 0.8, pos.x, pos.y + pos.h)
-      botGrad.addColorStop(0, 'transparent')
-      botGrad.addColorStop(1, '#000000')
-      ctx.fillStyle = botGrad
-      ctx.fillRect(pos.x, pos.y + pos.h * 0.8, pos.w, pos.h * 0.2)
-      ctx.restore()
+      ctx.fillStyle = bgColor
+      this.roundedRect(pos.x + pad, pos.y + pad, pos.w - pad * 2, pos.h - pad * 2, 6)
+      ctx.fill()
 
-      // --- 格子类型主题背景 ---
-      if (!pos.isCorner) {
-        this.drawTileTheme(pos, tile.type, tile.color)
+      // --- 地皮色彩条 ---
+      if (tile.color && !pos.isCorner) {
+        ctx.fillStyle = tile.color
+        if (pos.side === 'bottom' || pos.side === 'top') {
+          this.roundedRect(pos.x + pad + 2, pos.y + pad + 2, pos.w - pad * 2 - 4, 4, 2)
+        } else {
+          this.roundedRect(pos.x + pad + 2, pos.y + pad + 2, 4, pos.h - pad * 2 - 4, 2)
+        }
+        ctx.fill()
       }
 
       // --- 格子边框 ---
-      if (owner) {
-        ctx.strokeStyle = owner.color + 'bb'
-        ctx.lineWidth = 2
-      } else if (i === highlightTile) {
-        ctx.strokeStyle = '#a78bfa'
-        ctx.lineWidth = 2
-      } else {
-        // 纸牌边：双层边框效果
-        ctx.strokeStyle = 'rgba(200,190,170,0.2)'
-        ctx.lineWidth = 1
-      }
-      ctx.strokeRect(pos.x, pos.y, pos.w, pos.h)
+      ctx.strokeStyle = owner ? owner.color + '88'
+        : i === highlightTile ? 'rgba(167,139,250,0.5)'
+        : 'rgba(255,255,255,0.08)'
+      ctx.lineWidth = owner ? 2 : 1
+      this.roundedRect(pos.x + pad, pos.y + pad, pos.w - pad * 2, pos.h - pad * 2, 6)
+      ctx.stroke()
 
-      // --- 格子文字 ---
-      const cx = pos.x + pos.w / 2
-      const cy = pos.y + pos.h / 2
+      // --- 格子内容 ---
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
 
       if (pos.isCorner) {
-        ctx.font = '28px sans-serif'
-        ctx.fillText(tile.emoji, cx, cy - 12)
-        ctx.fillStyle = '#e0e0e0'
-        ctx.font = 'bold 16px "Noto Sans SC", sans-serif'
-        ctx.fillText(tile.name, cx, cy + 20)
-      } else if (owner) {
-        // 占领格子：城市名 + 简洁玩家标签
-        ctx.fillStyle = '#ffffff'
+        ctx.font = '26px sans-serif'
+        ctx.fillText(tile.emoji, cx, cy - 10)
+        ctx.fillStyle = '#e8e8e8'
         ctx.font = 'bold 14px "Noto Sans SC", sans-serif'
-        ctx.fillText(tile.name, cx, cy - 16)
-
-        // 简洁玩家标签：半透明背景 + 头像 + 名字
-        const labelH = 20
-        const labelW = pos.w * 0.85
-        const labelX = cx - labelW / 2
-        const labelY = cy + 2
-
-        ctx.fillStyle = 'rgba(0,0,0,0.45)'
-        this.roundedRect(labelX, labelY, labelW, labelH, 4)
-        ctx.fill()
-
-        // 头像
-        ctx.font = '12px sans-serif'
-        ctx.textAlign = 'left'
-        ctx.textBaseline = 'middle'
-        ctx.fillText(owner.avatar, labelX + 4, labelY + labelH / 2 + 1)
-
-        // 玩家名字
-        ctx.fillStyle = '#ffffff'
-        ctx.font = '11px "Noto Sans SC", sans-serif'
-        ctx.textAlign = 'center'
-        ctx.fillText(owner.name, cx + 4, labelY + labelH / 2 + 1)
+        ctx.fillText(tile.name, cx, cy + 18)
       } else {
-        // 未占领格子：城市名 + 价格
-        ctx.fillStyle = '#e0e0e0'
-        ctx.font = 'bold 15px "Noto Sans SC", sans-serif'
-        ctx.fillText(tile.name, cx, cy - 10)
-        if (tile.price > 0) {
-          ctx.fillStyle = '#94a3b8'
-          ctx.font = '12px "Noto Sans SC", sans-serif'
-          ctx.fillText(`¥${tile.price}`, cx, cy + 12)
+        ctx.font = '18px sans-serif'
+        ctx.fillText(tile.emoji, cx, cy - 14)
+
+        ctx.fillStyle = '#f0f0f0'
+        ctx.font = 'bold 13px "Noto Sans SC", sans-serif'
+        ctx.fillText(tile.name, cx, cy + 4)
+
+        if (owner) {
+          ctx.font = '12px sans-serif'
+          ctx.fillText(owner.avatar, cx, cy + 20)
+        } else if (tile.price > 0) {
+          ctx.fillStyle = '#8899aa'
+          ctx.font = '11px "Noto Sans SC", sans-serif'
+          ctx.fillText(`¥${tile.price}`, cx, cy + 20)
         }
       }
     }
