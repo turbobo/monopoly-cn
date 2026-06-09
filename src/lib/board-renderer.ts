@@ -64,12 +64,14 @@ export class BoardRenderer {
   resize() {
     const container = this.canvas.parentElement
     if (!container) return
-    const w = Math.min(container.clientWidth, container.clientHeight, 700)
-    this.canvas.width = w * 2
-    this.canvas.height = w * 2
+    const maxW = window.innerWidth < 768 ? Math.min(window.innerWidth - 16, 500) : 700
+    const w = Math.min(container.clientWidth - 8, container.clientHeight - 8, maxW)
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    this.canvas.width = w * dpr
+    this.canvas.height = w * dpr
     this.canvas.style.width = w + 'px'
     this.canvas.style.height = w + 'px'
-    this.size = w * 2
+    this.size = w * dpr
     this.tileSize = this.size / 8.5
     this.cornerSize = this.tileSize * 1.3
   }

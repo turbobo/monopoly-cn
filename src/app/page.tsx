@@ -50,9 +50,10 @@ export default function Home() {
     rendererRef.current = r
     r.resize()
     r.start()
-    const onResize = () => r.resize()
+    const onResize = () => setTimeout(() => r.resize(), 100)
     window.addEventListener('resize', onResize)
-    return () => { r.stop(); window.removeEventListener('resize', onResize) }
+    window.addEventListener('orientationchange', onResize)
+    return () => { r.stop(); window.removeEventListener('resize', onResize); window.removeEventListener('orientationchange', onResize) }
   }, [])
 
   // 绘制棋盘 + 同步当前玩家
@@ -614,10 +615,10 @@ export default function Home() {
   const isCurrentPlayerHuman = currentPlayer && !currentPlayer.isAI && !currentPlayer.bankrupt
 
   return (
-    <div className="h-screen w-screen flex">
-      {/* ===== 左侧：棋盘 ===== */}
-      <div className="flex-1 flex items-center justify-center bg-[#1a2332] p-4 relative">
-        <canvas ref={canvasRef} className="max-w-full max-h-full" />
+    <div className="h-screen w-screen flex flex-col md:flex-row">
+      {/* ===== 棋盘区域 ===== */}
+      <div className="flex-1 md:flex-1 flex items-center justify-center bg-[#1a2332] p-2 md:p-4 relative min-h-0" style={{ minHeight: 'min(50vh, 400px)' }}>
+        <canvas ref={canvasRef} className="max-w-full max-h-full touch-none" />
 
         {/* 游戏控制栏（游戏中可见） */}
         {screen === 'game' && (
@@ -857,9 +858,9 @@ export default function Home() {
         )}
       </div>
 
-      {/* ===== 右侧：信息面板 ===== */}
+      {/* ===== 信息面板 ===== */}
       {screen === 'game' && game && (
-        <div className="w-80 bg-[#1a2332] border-l border-white/8 flex flex-col h-screen overflow-hidden">
+        <div className="w-full md:w-80 bg-[#1a2332] md:border-l border-t md:border-t-0 border-white/8 flex flex-col md:h-screen overflow-y-auto md:overflow-hidden shrink-0" style={{ maxHeight: '50vh' }}>
           {/* 当前玩家（带颜色条+大头像） */}
           <div className="p-4 border-b border-white/8 relative overflow-hidden">
             <div className="absolute inset-0 opacity-10" style={{ background: `linear-gradient(135deg, ${currentPlayer?.color}44, transparent)` }} />
