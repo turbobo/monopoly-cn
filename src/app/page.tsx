@@ -615,9 +615,9 @@ export default function Home() {
   const isCurrentPlayerHuman = currentPlayer && !currentPlayer.isAI && !currentPlayer.bankrupt
 
   return (
-    <div className="h-screen w-screen flex flex-col md:flex-row">
+    <div className="h-[100dvh] w-screen flex flex-col md:flex-row overflow-hidden">
       {/* ===== 棋盘区域 ===== */}
-      <div className="flex-1 md:flex-1 flex items-center justify-center bg-[#1a2332] p-2 md:p-4 relative min-h-0" style={{ minHeight: 'min(50vh, 400px)' }}>
+      <div className="flex-[3] md:flex-1 flex items-center justify-center bg-[#1a2332] p-1 md:p-4 relative min-h-0">
         <canvas ref={canvasRef} className="max-w-full max-h-full touch-none" />
 
         {/* 游戏控制栏（游戏中可见） */}
@@ -860,46 +860,46 @@ export default function Home() {
 
       {/* ===== 信息面板 ===== */}
       {screen === 'game' && game && (
-        <div className="w-full md:w-80 bg-[#1a2332] md:border-l border-t md:border-t-0 border-white/8 flex flex-col md:h-screen overflow-y-auto md:overflow-hidden shrink-0" style={{ maxHeight: '50vh' }}>
+        <div className="w-full md:w-80 bg-[#1a2332] md:border-l border-t md:border-t-0 border-white/8 flex flex-col md:h-screen overflow-y-auto md:overflow-hidden shrink-0 flex-[2] md:flex-none">
           {/* 当前玩家（带颜色条+大头像） */}
-          <div className="p-4 border-b border-white/8 relative overflow-hidden">
+          <div className="p-2 md:p-4 border-b border-white/8 relative overflow-hidden">
             <div className="absolute inset-0 opacity-10" style={{ background: `linear-gradient(135deg, ${currentPlayer?.color}44, transparent)` }} />
             <div className="absolute top-0 left-0 w-full h-1" style={{ background: currentPlayer?.color }} />
             <div className="relative flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-full flex items-center justify-center text-2xl shadow-lg"
+              <div className="flex items-center gap-2 md:gap-3">
+                <div className="w-8 h-8 md:w-12 md:h-12 rounded-full flex items-center justify-center text-lg md:text-2xl shadow-lg"
                   style={{ background: currentPlayer?.color + '33', border: `2px solid ${currentPlayer?.color}` }}>
                   {currentPlayer?.avatar}
                 </div>
                 <div>
-                  <div className="text-gray-100 font-bold text-lg">{currentPlayer?.name}的回合</div>
-                  <div className="text-gray-500 text-xs">第{game.round}回合 / 共{game.maxRounds}回合</div>
+                  <div className="text-gray-100 font-bold text-sm md:text-lg">{currentPlayer?.name}的回合</div>
+                  <div className="text-gray-500 text-[10px] md:text-xs">第{game.round}回合 / 共{game.maxRounds}回合</div>
                 </div>
               </div>
               <div className="text-right">
-                <div className="text-xs text-gray-500">现金 <span className="text-sm font-bold" style={{ color: currentPlayer?.color }}>¥{currentPlayer?.money}</span></div>
-                <div className="text-xs text-gray-500">资产 <span className="text-sm font-bold text-amber-400">¥{currentPlayer ? totalWealth(currentPlayer) : 0}</span></div>
+                <div className="text-[10px] md:text-xs text-gray-500">现金 <span className="text-xs md:text-sm font-bold" style={{ color: currentPlayer?.color }}>¥{currentPlayer?.money}</span></div>
+                <div className="text-[10px] md:text-xs text-gray-500">资产 <span className="text-xs md:text-sm font-bold text-amber-400">¥{currentPlayer ? totalWealth(currentPlayer) : 0}</span></div>
               </div>
             </div>
           </div>
 
-          {/* 玩家列表（现金+资产分离显示+当前操作标识） */}
-          <div className="p-3 border-b border-white/8 space-y-2 max-h-60 overflow-y-auto">
+          {/* 玩家列表 */}
+          <div className="p-2 md:p-3 border-b border-white/8 space-y-1 md:space-y-2 max-h-32 md:max-h-60 overflow-y-auto">
             {game.players.map(p => {
               const isCurrent = p.id === currentPlayer?.id
               const propValue = p.properties.reduce((sum, id) => sum + BOARD[id].price, 0)
               return (
                 <div key={p.id}
-                  className={`p-2.5 rounded-xl transition-all relative ${p.bankrupt ? 'opacity-30' : ''}`}
+                  className={`p-1.5 md:p-2.5 rounded-xl transition-all relative ${p.bankrupt ? 'opacity-30' : ''}`}
                   style={{
                     background: isCurrent ? p.color + '18' : 'rgba(255,255,255,0.03)',
                     borderWidth: isCurrent ? 1 : 0,
                     borderColor: isCurrent ? p.color + '44' : 'transparent',
                     boxShadow: isCurrent ? `0 0 0 2px ${p.color}33, 0 0 12px ${p.color}15` : 'none',
                   }}>
-                  {/* 当前操作标识：左侧箭头 */}
+                  {/* 当前操作标识：左侧箭头（桌面端） */}
                   {isCurrent && !p.bankrupt && (
-                    <div className="absolute -left-1 top-1/2 -translate-y-1/2 flex items-center">
+                    <div className="absolute -left-1 top-1/2 -translate-y-1/2 hidden md:flex items-center">
                       <div className="animate-pulse">
                         <svg width="14" height="20" viewBox="0 0 14 20" fill="none">
                           <path d="M0 10L14 0V20L0 10Z" fill={p.color}/>
@@ -907,39 +907,37 @@ export default function Home() {
                       </div>
                     </div>
                   )}
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-lg relative"
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 md:w-8 md:h-8 rounded-full flex items-center justify-center text-sm md:text-lg relative"
                         style={{ background: p.color + '33', border: `1.5px solid ${p.color}` }}>
                         {p.avatar}
-                        {/* 当前玩家小圆点指示器 */}
                         {isCurrent && !p.bankrupt && (
-                          <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-green-400 border border-white animate-pulse" />
+                          <span className="absolute -top-0.5 -right-0.5 w-2 h-2 md:w-2.5 md:h-2.5 rounded-full bg-green-400 border border-white animate-pulse" />
                         )}
                       </div>
                       <div>
-                        <div className="text-sm text-gray-200 font-medium flex items-center gap-1.5">
+                        <div className="text-xs md:text-sm text-gray-200 font-medium flex items-center gap-1">
                           {p.name}
                           {isCurrent && !p.bankrupt && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold"
+                            <span className="text-[9px] md:text-[10px] px-1 md:px-1.5 py-0.5 rounded-full font-bold"
                               style={{ background: p.color + '33', color: p.color }}>
                               操作中
                             </span>
                           )}
-                          {p.isAI && <span className="text-xs text-gray-500">
+                          {p.isAI && <span className="text-[10px] text-gray-500 hidden md:inline">
                             ({p.aiPersonality === 'aggressive' ? '激进' : p.aiPersonality === 'conservative' ? '保守' : '平衡'})
                           </span>}
                         </div>
-                        <div className="text-xs" style={{ color: p.color }}>{p.properties.length}块地</div>
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="text-sm font-bold" style={{ color: p.color }}>💰 ¥{p.money}</div>
-                      <div className="text-xs text-amber-400 font-medium">🏠 ¥{propValue}</div>
+                      <div className="text-xs md:text-sm font-bold" style={{ color: p.color }}>¥{p.money}</div>
+                      <div className="text-[10px] text-gray-500">{p.properties.length}块地 · ¥{totalWealth(p)}</div>
                     </div>
                   </div>
-                  {/* 总资产进度条 */}
-                  <div className="flex items-center gap-2 mt-1">
+                  {/* 总资产进度条（桌面端） */}
+                  <div className="hidden md:flex items-center gap-2 mt-1">
                     <div className="flex-1 h-1.5 rounded-full bg-white/5 overflow-hidden flex">
                       <div className="h-full rounded-l-full transition-all duration-500" style={{ width: `${totalWealth(p) > 0 ? (p.money / totalWealth(p)) * 100 : 100}%`, background: p.color }} />
                       <div className="h-full rounded-r-full transition-all duration-500" style={{ width: `${totalWealth(p) > 0 ? (propValue / totalWealth(p)) * 100 : 0}%`, background: '#f59e0b' }} />
@@ -952,7 +950,7 @@ export default function Home() {
           </div>
 
           {/* 操作区 */}
-          <div className="p-4 border-b border-white/8">
+          <div className="p-2 md:p-4 border-b border-white/8">
             {diceResult && !buyPrompt && (
               <div className="text-center text-sm text-amber-400 font-bold mb-2 bounce-in">
                 🎲 {diceResult}
@@ -1141,13 +1139,13 @@ export default function Home() {
           </div>
 
           {/* 游戏日志 */}
-          <div className="flex-1 overflow-hidden flex flex-col">
-            <div className="px-4 pt-3 text-xs text-gray-500 font-medium">游戏日志</div>
-            <div ref={logRef} className="flex-1 overflow-y-auto p-4 space-y-1.5">
+          <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+            <div className="px-2 md:px-4 pt-2 md:pt-3 text-[10px] md:text-xs text-gray-500 font-medium">游戏日志</div>
+            <div ref={logRef} className="flex-1 overflow-y-auto px-2 md:px-4 py-1 md:py-2 space-y-1">
               {messages.map((msg, i) => {
                 const isLast = i === messages.length - 1
                 return (
-                  <div key={i} className={`text-xs transition-all ${isLast ? 'text-gray-100 font-medium fade-in' : 'text-gray-500'}`}>
+                  <div key={i} className={`text-[10px] md:text-xs transition-all ${isLast ? 'text-gray-100 font-medium fade-in' : 'text-gray-500'}`}>
                     {msg}
                   </div>
                 )
@@ -1155,8 +1153,8 @@ export default function Home() {
             </div>
           </div>
 
-          {/* 底部：所有玩家的地皮（按颜色分组） */}
-          <div className="p-3 border-t border-white/8 max-h-44 overflow-y-auto">
+          {/* 底部：所有玩家的地皮（桌面端显示） */}
+          <div className="hidden md:block p-3 border-t border-white/8 max-h-44 overflow-y-auto">
             <div className="text-xs text-gray-500 mb-2">地皮归属</div>
             {game.players.filter(p => p.properties.length > 0).map(p => (
               <div key={p.id} className="mb-2">
