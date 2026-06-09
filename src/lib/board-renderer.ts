@@ -339,50 +339,31 @@ export class BoardRenderer {
       this.roundedRect(pos.x + pad, pos.y + pad, pos.w - pad * 2, pos.h - pad * 2, 6)
       ctx.fill()
 
-      // --- 地皮色彩条 ---
-      if (tile.color && !pos.isCorner) {
-        ctx.fillStyle = tile.color
-        if (pos.side === 'bottom' || pos.side === 'top') {
-          this.roundedRect(pos.x + pad + 2, pos.y + pad + 2, pos.w - pad * 2 - 4, 4, 2)
-        } else {
-          this.roundedRect(pos.x + pad + 2, pos.y + pad + 2, 4, pos.h - pad * 2 - 4, 2)
-        }
-        ctx.fill()
-      }
-
-      // --- 格子边框 ---
-      ctx.strokeStyle = owner ? owner.color + '88'
-        : i === highlightTile ? 'rgba(167,139,250,0.5)'
-        : 'rgba(255,255,255,0.08)'
-      ctx.lineWidth = owner ? 2 : 1
-      this.roundedRect(pos.x + pad, pos.y + pad, pos.w - pad * 2, pos.h - pad * 2, 6)
-      ctx.stroke()
-
       // --- 格子内容 ---
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
 
       if (pos.isCorner) {
-        ctx.font = '26px sans-serif'
-        ctx.fillText(tile.emoji, cx, cy - 10)
+        ctx.font = '30px sans-serif'
+        ctx.fillText(tile.emoji, cx, cy - 12)
         ctx.fillStyle = '#e8e8e8'
-        ctx.font = 'bold 14px "Noto Sans SC", sans-serif'
-        ctx.fillText(tile.name, cx, cy + 18)
+        ctx.font = 'bold 17px "Noto Sans SC", sans-serif'
+        ctx.fillText(tile.name, cx, cy + 20)
       } else {
-        ctx.font = '18px sans-serif'
-        ctx.fillText(tile.emoji, cx, cy - 14)
+        ctx.font = '22px sans-serif'
+        ctx.fillText(tile.emoji, cx, cy - 16)
 
         ctx.fillStyle = '#f0f0f0'
-        ctx.font = 'bold 13px "Noto Sans SC", sans-serif'
-        ctx.fillText(tile.name, cx, cy + 4)
+        ctx.font = 'bold 16px "Noto Sans SC", sans-serif'
+        ctx.fillText(tile.name, cx, cy + 5)
 
         if (owner) {
-          ctx.font = '12px sans-serif'
-          ctx.fillText(owner.avatar, cx, cy + 20)
+          ctx.font = '15px sans-serif'
+          ctx.fillText(owner.avatar, cx, cy + 23)
         } else if (tile.price > 0) {
           ctx.fillStyle = '#8899aa'
-          ctx.font = '11px "Noto Sans SC", sans-serif'
-          ctx.fillText(`¥${tile.price}`, cx, cy + 20)
+          ctx.font = '13px "Noto Sans SC", sans-serif'
+          ctx.fillText(`¥${tile.price}`, cx, cy + 23)
         }
       }
     }
@@ -395,13 +376,13 @@ export class BoardRenderer {
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
 
     ctx.fillStyle = 'rgba(139,92,246,0.15)'
-    ctx.font = 'bold 40px "Noto Sans SC", sans-serif'
+    ctx.font = 'bold 44px "Noto Sans SC", sans-serif'
     ctx.fillText('大富翁', cx + 2, cy - 38)
     ctx.fillStyle = '#8b5cf6'
-    ctx.font = 'bold 38px "Noto Sans SC", sans-serif'
+    ctx.font = 'bold 42px "Noto Sans SC", sans-serif'
     ctx.fillText('大富翁', cx, cy - 40)
     ctx.fillStyle = '#6366f1'
-    ctx.font = '22px "Noto Sans SC", sans-serif'
+    ctx.font = '24px "Noto Sans SC", sans-serif'
     ctx.fillText('中国行', cx, cy - 5)
 
     if (this.diceAnim.active) {

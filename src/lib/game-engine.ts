@@ -280,6 +280,55 @@ export function tradeDecision(seller: Player, tile: Tile, offer: number): boolea
   return offer >= minAccept
 }
 
+// ===== AI 主动变卖资产决策 =====
+export function aiSellDecision(player: Player): number | null {
+  if (!player.isAI || player.properties.length === 0) return null
+  const personality = player.aiPersonality || 'balanced'
+  const threshold = personality === 'aggressive' ? 50
+    : personality === 'conservative' ? 150
+    : 100
+  if (player.money >= threshold) return null
+
+  // 优先卖不在同色组内的最便宜地皮
+  const sorted = [...player.properties].sort((a, b) => BOARD[a].price - BOARD[b].price)
+  for (const tileId of sorted) {
+    const tile = BOARD[tileId]
+    const group = COLOR_GROUPS[tile.color]
+    if (!group) return tileId
+    const owned = group.filter(id => player.properties.includes(id)).length
+    if (owned < group.length) return tileId
+  }
+  return sorted[0]
+}
+
+// ===== AI 主动发起交易决策（作为买方） =====
+export function aiTradeInitDecision(buyer: Player, gs: GameState): { targetId: number; tileId: number; offer: number } | null {
+  if (!buyer.isAI || buyer.bankrupt) return null
+  const personality = buyer.aiPersonality || 'balanced'
+
+  for (const [color, group] of Object.entries(COLOR_GROUPS)) {
+    const owned = group.filter(id => buyer.properties.includes(id))
+    if (owned.length === 0 || owned.length >= group.length) continue
+    const missing = group.filter(id => !buyer.properties.includes(id))
+
+    for (const tileId of missing) {
+      const tile = BOARD[tileId]
+      const owner = gs.players.find(p => p.properties.includes(tileId) && !p.bankrupt && p.id !== buyer.id)
+      if (!owner) continue
+
+      const mult = personality === 'aggressive' ? 1.6
+        : personality === 'conservative' ? 1.3
+        : 1.4
+      const offer = Math.floor(tile.price * mult)
+
+      if (offer <= buyer.money * 0.5) {
+        return { targetId: owner.id, tileId, offer }
+      }
+    }
+  }
+  return null
+}
+
 // ===== 游戏回合推进 =====
 export function executeTurn(gs: GameState, preRolledDice?: [number, number]): string[] {
   const messages: string[] = []
@@ -449,9 +498,10 @@ export function createGame(mode: 'ai' | 'local', playerCount: number, initialMon
 
   if (mode === 'ai') {
     players.push(createPlayer(0, '你', false, undefined, initialMoney))
-    const personalities: ('aggressive' | 'balanced' | 'conservative')[] = ['aggressive', 'balanced']
-    const names = ['小火', '阿平']
-    for (let i = 0; i < Math.min(playerCount - 1, 2); i++) {
+    // playerCount = AI对手数量（1/2/3）
+    const personalities: ('aggressive' | 'balanced' | 'conservative')[] = ['aggressive', 'balanced', 'conservative']
+    const names = ['小火', '阿平', '老守']
+    for (let i = 0; i < Math.min(playerCount, 3); i++) {
       players.push(createPlayer(i + 1, names[i], true, personalities[i], initialMoney))
     }
   } else {

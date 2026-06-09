@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   GameState, Player, Tile, BOARD, BOARD_SIZE, COLOR_GROUPS,
   createGame, executeTurn, buyProperty, totalWealth, rollDice, calculateRent, checkBankrupt,
-  auctionDecision, tradeDecision,
+  auctionDecision, tradeDecision, aiSellDecision, aiTradeInitDecision,
 } from '@/lib/game-engine'
 import { BoardRenderer } from '@/lib/board-renderer'
 import {
@@ -72,9 +72,10 @@ export default function Home() {
     const gs = createGame(mode, playerCount, initialMoney, difficulty)
     setGame(gs)
     const diffLabel = difficulty === 'easy' ? '简单' : difficulty === 'hard' ? '困难' : '普通'
+    const aiNames = ['小火(激进)', '阿平(平衡)', '老守(保守)']
     setMessages([
-      `🎲 游戏开始！初始资金 ¥${initialMoney} | 难度：${diffLabel}` + (mode === 'ai' ? ' 你的对手是小火(激进)和阿平(平衡)' : ` ${playerCount}人本地对战`),
-      `📋 规则：放弃购买→触发拍卖 | 10回合后租金x1.5 | 20回合后x2 | 起点奖金随回合递增 | 可发起交易`,
+      `🎲 游戏开始！初始资金 ¥${initialMoney} | 难度：${diffLabel}` + (mode === 'ai' ? ` 对手：${aiNames.slice(0, playerCount).join('、')}` : ` ${playerCount}人本地对战`),
+      `📋 规则：放弃购买→拍卖 | 10回合租金x1.5/20回合x2 | 起点奖金递增 | 变卖资产/发起交易 | AI也会主动卖地和交易`,
     ])
     setScreen('game')
     setBuyPrompt(null)
@@ -156,6 +157,7 @@ export default function Home() {
     if (gs.gameOver) {
       setTimeout(() => setScreen('end'), 1500)
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [triggerBoardEffects])
 
   // 掷骰子（音效+骰子动画 → 逐格移动+步音效 → 执行回合）
@@ -234,9 +236,9 @@ export default function Home() {
         )
       }
     }, 700)
-  }, [game, rolling, buyPrompt, finishTurn])
+  }, [game, rolling, buyPrompt, paused, finishTurn])
 
-  // AI连续执行回合（含移动动画）
+  // AI连续执行回合（含移动动画 + 预操作：变卖/交易）
   const handleAITurns = useCallback((gs: GameState) => {
     const doOneAITurn = (state: GameState) => {
       if (state.gameOver || !state.players[state.currentPlayer].isAI) {
@@ -247,63 +249,124 @@ export default function Home() {
 
       const actingIdx = state.currentPlayer
       const aiPlayer = state.players[actingIdx]
-      const fromTile = aiPlayer.position
-      const dice = rollDice()
-      const total = dice[0] + dice[1]
 
-      const r = rendererRef.current
+      // ===== AI 预操作：变卖资产 + 发起交易 =====
+      const preActions: (() => void)[] = []
+      const workingState = { ...state, players: state.players.map(p => ({ ...p, properties: [...p.properties] })) }
+      const wp = workingState.players[actingIdx]
 
-      const processResult = (next: GameState, msgs: string[]) => {
-        setMessages(m => [...m, ...msgs])
-        triggerBoardEffects(msgs, actingIdx, next)
-        setGame(next)
-        if (!next.gameOver && next.players[next.currentPlayer].isAI) {
-          setTimeout(() => doOneAITurn(next), 400)
-        } else if (next.gameOver) {
-          setTimeout(() => setScreen('end'), 1500)
+      // 检查变卖
+      const sellId = aiSellDecision(wp)
+      if (sellId !== null) {
+        const tile = BOARD[sellId]
+        const sellPrice = Math.floor(tile.price * 0.6)
+        preActions.push(() => {
+          wp.money += sellPrice
+          wp.properties = wp.properties.filter(id => id !== sellId)
+          setMessages(m => [...m, `🏷️ ${wp.name} 主动变卖了 ${tile.name}（¥${sellPrice}）`])
+          rendererRef.current?.showFloatingText(sellId, `🏷️${wp.name}卖出`, '#f59e0b')
+          playPaySound()
+          setGame({ ...workingState })
+        })
+      }
+
+      // 检查交易
+      const trade = aiTradeInitDecision(wp, workingState)
+      if (trade) {
+        const target = workingState.players.find(p => p.id === trade.targetId)!
+        const tile = BOARD[trade.tileId]
+        const accepted = target.isAI
+          ? tradeDecision(target, tile, trade.offer)
+          : false // 对人类玩家不自动发起（需要UI交互）
+        if (accepted) {
+          preActions.push(() => {
+            wp.money -= trade.offer
+            target.money += trade.offer
+            target.properties = target.properties.filter(id => id !== trade.tileId)
+            wp.properties.push(trade.tileId)
+            setMessages(m => [...m, `🤝 ${wp.name} 以 ¥${trade.offer} 从 ${target.name} 购得 ${tile.name}`])
+            rendererRef.current?.showFloatingText(trade.tileId, `🤝${wp.name}买入`, '#4ade80')
+            playBuySound()
+            setGame({ ...workingState })
+          })
+        } else if (target.isAI) {
+          preActions.push(() => {
+            setMessages(m => [...m, `🚫 ${wp.name} 想买 ${target.name} 的 ${tile.name}（¥${trade.offer}），被拒绝`])
+          })
         }
       }
 
-      if (r) {
-        playDiceRoll()
-        r.playDiceAnimation(dice, () => playDiceLand())
+      // 执行预操作后再掷骰
+      const executeRoll = () => {
+        const fromTile = wp.position
+        const dice = rollDice()
+        const total = dice[0] + dice[1]
+        const r = rendererRef.current
 
-        if (aiPlayer.inJail) {
-          const canEscape = aiPlayer.jailTurns >= 2 || dice[0] === dice[1]
-          setTimeout(() => {
-            if (canEscape) {
+        const processResult = (next: GameState, msgs: string[]) => {
+          setMessages(m => [...m, ...msgs])
+          triggerBoardEffects(msgs, actingIdx, next)
+          setGame(next)
+          if (!next.gameOver && next.players[next.currentPlayer].isAI) {
+            setTimeout(() => doOneAITurn(next), 400)
+          } else if (next.gameOver) {
+            setTimeout(() => setScreen('end'), 1500)
+          }
+        }
+
+        if (r) {
+          playDiceRoll()
+          r.playDiceAnimation(dice, () => playDiceLand())
+
+          if (wp.inJail) {
+            const canEscape = wp.jailTurns >= 2 || dice[0] === dice[1]
+            setTimeout(() => {
+              if (canEscape) {
+                r.playMoveAnimation(
+                  wp.id, fromTile, total, wp.color, wp.avatar,
+                  () => {
+                    const next = { ...workingState, players: workingState.players.map(p => ({ ...p, properties: [...p.properties] })) }
+                    const msgs = executeTurn(next, dice)
+                    processResult(next, msgs)
+                  },
+                  () => playStepSound()
+                )
+              } else {
+                const next = { ...workingState, players: workingState.players.map(p => ({ ...p, properties: [...p.properties] })) }
+                const msgs = executeTurn(next, dice)
+                processResult(next, msgs)
+              }
+            }, 500)
+          } else {
+            setTimeout(() => {
               r.playMoveAnimation(
-                aiPlayer.id, fromTile, total, aiPlayer.color, aiPlayer.avatar,
+                wp.id, fromTile, total, wp.color, wp.avatar,
                 () => {
-                  const next = { ...state, players: state.players.map(p => ({ ...p, properties: [...p.properties] })) }
+                  const next = { ...workingState, players: workingState.players.map(p => ({ ...p, properties: [...p.properties] })) }
                   const msgs = executeTurn(next, dice)
                   processResult(next, msgs)
                 },
                 () => playStepSound()
               )
-            } else {
-              const next = { ...state, players: state.players.map(p => ({ ...p, properties: [...p.properties] })) }
-              const msgs = executeTurn(next, dice)
-              processResult(next, msgs)
-            }
-          }, 500)
+            }, 500)
+          }
         } else {
-          setTimeout(() => {
-            r.playMoveAnimation(
-              aiPlayer.id, fromTile, total, aiPlayer.color, aiPlayer.avatar,
-              () => {
-                const next = { ...state, players: state.players.map(p => ({ ...p, properties: [...p.properties] })) }
-                const msgs = executeTurn(next, dice)
-                processResult(next, msgs)
-              },
-              () => playStepSound()
-            )
-          }, 500)
+          const next = { ...workingState, players: workingState.players.map(p => ({ ...p, properties: [...p.properties] })) }
+          executeTurn(next, dice)
+          setGame(next)
         }
+      }
+
+      // 链式执行预操作 → 掷骰
+      if (preActions.length > 0) {
+        let delay = 0
+        for (const action of preActions) {
+          setTimeout(action, delay)
+          delay += 800
+        }
+        setTimeout(executeRoll, delay)
       } else {
-        const next = { ...state, players: state.players.map(p => ({ ...p, properties: [...p.properties] })) }
-        executeTurn(next, dice)
-        setGame(next)
+        executeRoll()
       }
     }
 
@@ -442,12 +505,22 @@ export default function Home() {
     const bidder = game.players.find(p => !p.bankrupt && !p.isAI && !auctionState.passedPlayers.includes(p.id))
     if (!bidder) return
     if (bid > 0 && bid <= bidder.money && bid > auctionState.highestBid) {
-      setAuctionState({ ...auctionState, highestBid: bid, highestBidder: bidder })
+      setAuctionState({ ...auctionState, highestBid: bid, highestBidder: bidder, passedPlayers: [...auctionState.passedPlayers, bidder.id] })
       setMessages(m => [...m, `🔨 ${bidder.name} 出价 ¥${bid}`])
     }
   }, [game, auctionState])
 
-  // 拍卖放弃/确认结果（结束拍卖，推进下一玩家）
+  // 拍卖放弃当前竞拍者（不结束拍卖，让下一个人竞拍）
+  const handleAuctionPass = useCallback(() => {
+    if (!game || !auctionState) return
+    const bidder = game.players.find(p => !p.bankrupt && !p.isAI && !auctionState.passedPlayers.includes(p.id))
+    if (!bidder) return
+    const newPassed = [...auctionState.passedPlayers, bidder.id]
+    setAuctionState({ ...auctionState, passedPlayers: newPassed })
+    setMessages(m => [...m, `🔨 ${bidder.name} 放弃竞拍`])
+  }, [game, auctionState])
+
+  // 拍卖确认结果（结束拍卖，推进下一玩家）
   const handleAuctionEnd = useCallback(() => {
     if (!game || !auctionState) return
     setGame(prev => {
@@ -654,7 +727,7 @@ export default function Home() {
                     className={`py-3 rounded-xl font-medium transition-all ${mode === 'local' ? 'bg-orange-500/20 border-orange-500 text-orange-300 border' : 'bg-white/5 border border-white/10 text-gray-400'}`}>
                     👥 本地多人
                   </button>
-                  <button onClick={() => { setMode('ai'); setPlayerCount(3) }}
+                  <button onClick={() => { setMode('ai'); setPlayerCount(2) }}
                     className={`py-3 rounded-xl font-medium transition-all ${mode === 'ai' ? 'bg-orange-500/20 border-orange-500 text-orange-300 border' : 'bg-white/5 border border-white/10 text-gray-400'}`}>
                     🤖 挑战AI
                   </button>
@@ -666,7 +739,7 @@ export default function Home() {
                   {mode === 'ai' ? 'AI对手数量' : '玩家人数'}
                 </label>
                 <div className="flex gap-3">
-                  {(mode === 'ai' ? [2, 3] : [2, 3, 4]).map(n => (
+                  {(mode === 'ai' ? [1, 2, 3] : [2, 3, 4]).map(n => (
                     <button key={n} onClick={() => setPlayerCount(n)}
                       className={`flex-1 py-3 rounded-xl font-medium transition-all ${playerCount === n ? 'bg-orange-500/20 border-orange-500 text-orange-300 border' : 'bg-white/5 border border-white/10 text-gray-400'}`}>
                       {n}人
@@ -911,7 +984,7 @@ export default function Home() {
                         +¥50
                       </button>
                     </div>
-                    <button onClick={handleAuctionEnd}
+                    <button onClick={handleAuctionPass}
                       className="w-full py-2 bg-white/8 rounded-lg text-gray-400 text-xs hover:bg-white/15 transition-colors">
                       放弃竞拍
                     </button>
